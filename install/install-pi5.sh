@@ -7,7 +7,8 @@
 # Použití (z adresáře repozitáře):
 #   sudo ./install/install-pi5.sh
 # Volby přes proměnné prostředí:
-#   WIFI_MODE=hotspot|none   (výchozí hotspot: Pi vytvoří Wi-Fi síť pro tablet)
+#   WIFI_MODE=hotspot|none   (hotspot: Pi vytvoří vlastní Wi-Fi pro tablet, bez internetu;
+#                             none: Pi zůstane v domácí/dílenské Wi-Fi a tablet se připojí přes ni)
 #   WIFI_SSID=OpenCNC  WIFI_PASS=<heslo, min. 8 znaků>
 #   ETH_IF=eth0              rozhraní k EC300
 #   HTTP_PORT=80
@@ -43,8 +44,9 @@ say "Ethernet $ETH_IF pro EC300: 10.10.10.11/24"
 nmcli -t -f NAME con show | grep -qx ec300 && nmcli con delete ec300 >/dev/null
 nmcli con add type ethernet ifname "$ETH_IF" con-name ec300 \
     ipv4.method manual ipv4.addresses 10.10.10.11/24 ipv4.never-default yes ipv6.method disabled \
-    connection.autoconnect yes >/dev/null
-nmcli con up ec300 >/dev/null || echo "  (EC300 zatím není připojená, spojení naběhne po připojení kabelu)"
+    connection.autoconnect yes connection.autoconnect-priority 100 >/dev/null
+# neaktivovat hned: instalace může běžet přes SSH na stejném rozhraní, platí po restartu
+echo "  Aktivuje se po restartu."
 
 if [ "$WIFI_MODE" = "hotspot" ]; then
     say "Wi-Fi hotspot '$WIFI_SSID' pro tablet"
@@ -54,8 +56,9 @@ if [ "$WIFI_MODE" = "hotspot" ]; then
     nmcli -t -f NAME con show | grep -qx cnclinux-ap && nmcli con delete cnclinux-ap >/dev/null
     nmcli con add type wifi ifname wlan0 con-name cnclinux-ap autoconnect yes ssid "$WIFI_SSID" \
         802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared ipv4.addresses 192.168.50.1/24 \
-        wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASS" >/dev/null
-    nmcli con up cnclinux-ap >/dev/null || echo "  (hotspot se spustí po restartu)"
+        wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASS" connection.autoconnect-priority 100 >/dev/null
+    # neaktivovat hned: odpojilo by to SSH přes Wi-Fi uprostřed instalace, platí po restartu
+    echo "  Hotspot se zapne po restartu (domácí Wi-Fi pak Pi nepoužívá)."
 fi
 
 say "Oprávnění (sudoers) pro aktualizace a test latence"
