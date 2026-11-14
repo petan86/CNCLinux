@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#181c21">
+<title>OpenCNC Web</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <span class="brand"><i></i><span>OPENCNC WEB</span></span>
+    <span class="pill" id="pRuntime">…</span>
+    <span class="pill" id="pMachine">…</span>
+    <span class="pill" id="pBoard">EC300</span>
+    <span class="spacer"></span>
+    <button class="btn sm ghost" id="bUser">Přihlásit</button>
+    <button class="estop" id="bEstop" title="Softwarový E-stop. Hlavní je hardwarové tlačítko u stroje.">E-STOP</button>
+  </header>
+  <div class="alarmbar" id="alarms" hidden></div>
+
+  <main class="screens">
+    <!-- F1 NASTAVENÍ -->
+    <section class="screen" id="s-setup" hidden>
+      <div class="panel" id="setupLocked" hidden>
+        <h2>Nastavení stroje</h2>
+        <div class="note">Nastavení může měnit jen správce.</div>
+        <div><button class="btn primary" data-login="admin">Přihlásit správce</button></div>
+      </div>
+      <div id="setupBody" hidden style="display:grid;gap:10px">
+        <div class="row">
+          <div class="seg" id="setupTabs">
+            <button class="on" data-st="wizard">Průvodce</button>
+            <button data-st="history">Zálohy</button>
+            <button data-st="updates">Aktualizace</button>
+            <button data-st="security">Hesla</button>
+          </div>
+          <span class="spacer"></span>
+          <span class="muted" id="setupState"></span>
+        </div>
+        <div id="st-wizard" style="display:grid;gap:10px">
+          <div class="steps" id="steps"></div>
+          <div id="stepBody" style="display:grid;gap:10px"></div>
+          <div class="row">
+            <button class="btn" id="stepPrev">Zpět</button>
+            <span class="spacer"></span>
+            <button class="btn primary" id="stepNext">Další</button>
+          </div>
+        </div>
+        <div id="st-history" class="panel" hidden>
+          <h2>Zálohy konfigurace</h2>
+          <div class="note">Před každým uložením se uloží záloha. Záloha označená <b>funkční</b> je poslední, se kterou LinuxCNC běželo a deska odpovídala.</div>
+          <div class="list" id="historyList"></div>
+        </div>
+        <div id="st-updates" class="panel" hidden>
+          <h2>Aktualizace</h2>
+          <div class="grid2">
+            <div class="panel" style="background:var(--panel2)">
+              <h2>Systém a LinuxCNC</h2>
+              <div class="muted">Balíčky z repozitáře Debianu a LinuxCNC. Řízení musí stát.</div>
+              <div class="row"><button class="btn" data-job="check_updates">Zkontrolovat</button><button class="btn primary" data-job="upgrade">Aktualizovat</button></div>
+            </div>
+            <div class="panel" style="background:var(--panel2)">
+              <h2>Komponenta Remora</h2>
+              <div class="muted">Přeloží a nainstaluje remora-eth-3.0 (nutné po aktualizaci LinuxCNC).</div>
+              <div class="row"><button class="btn" data-job="halcomp">Přeložit a nainstalovat</button></div>
+            </div>
+            <div class="panel" style="background:var(--panel2)">
+              <h2>Firmware EC300</h2>
+              <div class="muted">Přes Raspberry Pi Pico (debugprobe) připojené k USB Raspberry Pi. Soubor .bin pro RT1052.</div>
+              <div class="row"><label class="btn" for="fwFile">Vybrat firmware a nahrát</label><input type="file" id="fwFile" accept=".bin" hidden></div>
+            </div>
+            <div class="panel" style="background:var(--panel2)">
+              <h2>Raspberry Pi</h2>
+              <div class="row"><button class="btn" data-power="reboot">Restartovat</button><button class="btn danger" data-power="poweroff">Vypnout</button></div>
+            </div>
+          </div>
+        </div>
+        <div id="st-security" class="panel" hidden>
+          <h2>Hesla</h2>
+          <div class="grid2">
+            <div class="field"><label for="pwAdmin">Nové heslo správce</label><input class="inp" type="password" id="pwAdmin" autocomplete="new-password"><small>Prázdné = beze změny</small></div>
+            <div class="field"><label for="pwOperator">Nové heslo obsluhy</label><input class="inp" type="password" id="pwOperator" autocomplete="new-password"><small>Prázdné + zaškrtnuto = obsluha bez hesla</small></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="pwOperatorClear"> Obsluha bez hesla</label>
+          <div><button class="btn primary" id="pwSave">Uložit hesla</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- F2 BĚH -->
+    <section class="screen run" id="s-run" hidden>
+      <div class="panel">
+        <h2>Poloha <span class="right mono" id="runWcs"></span></h2>
+        <div class="dro big" id="runDro"></div>
+        <div class="row muted mono" style="justify-content:space-between;font-size:13px"><span id="runTool">T0</span><span id="runSpindle">S 0</span><span id="runFeed"></span></div>
+      </div>
+      <div class="tp" id="runTp">
+        <canvas></canvas>
+        <div class="tpbar">
+          <button class="btn xs" data-view="top">Shora</button>
+          <button class="btn xs" data-view="iso">Izo</button>
+          <button class="btn xs" data-view="front">Zepředu</button>
+          <button class="btn xs" data-view="fit">Celé</button>
+        </div>
+        <div class="tpinfo" id="runTpInfo"></div>
+      </div>
+      <div class="panel">
+        <h2>Program <span class="right mono" id="runFile">žádný</span></h2>
+        <div class="progress"><i id="runProg"></i></div>
+        <div class="row mono muted" style="justify-content:space-between;font-size:13px"><span id="runLine"></span><span id="runTime"></span></div>
+        <div class="grid4">
+          <button class="btn primary" id="bRun">Start</button>
+          <button class="btn" id="bPause">Pauza</button>
+          <button class="btn" id="bStep">Krok</button>
+          <button class="btn danger" id="bStop">Stop</button>
+        </div>
+        <div class="ovr">
+          <label for="oFeed">Posuv</label><input type="range" id="oFeed" min="0" max="150" step="5"><output id="oFeedOut"></output>
+          <label for="oRapid">Rychlo</label><input type="range" id="oRapid" min="0" max="100" step="5"><output id="oRapidOut"></output>
+          <label for="oSpindle">Vřeteno</label><input type="range" id="oSpindle" min="50" max="120" step="5"><output id="oSpindleOut"></output>
+        </div>
+        <div class="gcode" id="runGcode" style="max-height:180px"></div>
+      </div>
+    </section>
+
+    <!-- F3 JOG -->
+    <section class="screen jogscr" id="s-jog" hidden>
+      <div class="panel">
+        <h2>Poloha <span class="right mono" id="jogWcs"></span></h2>
+        <div class="dro" id="jogDro"></div>
+        <div class="row">
+          <button class="btn primary grow" id="bHomeAll">Referovat vše</button>
+          <button class="btn" id="bPower">Zapnout</button>
+        </div>
+        <div class="h2">Souřadný systém</div>
+        <div class="seg" id="wcsSeg"></div>
+      </div>
+      <div class="panel">
+        <h2>Ruční posuv <span class="right muted" id="jogMode"></span></h2>
+        <div class="seg" id="incSeg">
+          <button class="on" data-inc="0">Plynule</button><button data-inc="0.01">0.01</button><button data-inc="0.1">0.1</button><button data-inc="1">1</button><button data-inc="10">10</button>
+        </div>
+        <div class="pad">
+          <span></span><button class="jog" data-axis="1" data-dir="1">Y+</button><span></span><span></span><button class="jog" data-axis="2" data-dir="1">Z+</button>
+          <button class="jog" data-axis="0" data-dir="-1">X−</button><div class="hint" id="jogHint">držet = jet</div><button class="jog" data-axis="0" data-dir="1">X+</button><span></span><span></span>
+          <span></span><button class="jog" data-axis="1" data-dir="-1">Y−</button><span></span><span></span><button class="jog" data-axis="2" data-dir="-1">Z−</button>
+        </div>
+        <div class="ovr" style="grid-template-columns:auto 1fr 110px">
+          <label for="jogSpeed">Rychlost</label><input type="range" id="jogSpeed" min="1" max="100" value="30"><output id="jogSpeedOut"></output>
+        </div>
+      </div>
+      <div class="panel mdi">
+        <h2>MDI</h2>
+        <form class="row" id="mdiForm" autocomplete="off">
+          <input class="inp grow mono" id="mdiInput" placeholder="např. G0 X0 Y0" autocapitalize="characters" spellcheck="false">
+          <button class="btn primary" type="submit">Odeslat</button>
+        </form>
+        <div class="row"><button class="btn sm" data-mdi="M5">M5</button><button class="btn sm" data-mdi="M9">M9</button><button class="btn sm" data-mdi="G21">G21</button><button class="btn sm" data-mdi="G90">G90</button></div>
+        <div class="list" id="mdiHist"><div class="empty">Historie příkazů. Klepnutím vložíš znovu.</div></div>
+      </div>
+    </section>
+
+    <!-- F4 NÁSTROJE -->
+    <section class="screen two" id="s-tools" hidden>
+      <div class="panel">
+        <h2>Tabulka nástrojů <span class="right"><button class="btn xs" id="toolAdd">Přidat</button> <button class="btn xs primary" id="toolSave">Uložit</button></span></h2>
+        <div class="tbl"><table><thead><tr><th>T</th><th>Délka Z</th><th>Průměr</th><th>Popis</th><th></th></tr></thead><tbody id="toolBody"></tbody></table></div>
+      </div>
+      <div class="panel">
+        <h2>Nástroj ve vřetenu</h2>
+        <div class="row"><span class="mono" style="font-size:40px;font-weight:800" id="toolCur">T0</span></div>
+        <div class="row">
+          <input class="inp num" id="toolNum" type="number" min="1" style="width:120px" placeholder="T">
+          <button class="btn primary" id="toolChange">Vyměnit (M6 + G43)</button>
+        </div>
+        <div class="note">M6 se zatím potvrzuje automaticky: nástroj vyměň ručně, než stiskneš Start. Délka Z se použije přes G43.</div>
+      </div>
+    </section>
+
+    <!-- F5 DIAGNOSTIKA -->
+    <section class="screen" id="s-diag" hidden>
+      <div class="row">
+        <div class="seg" id="diagTabs">
+          <button class="on" data-dt="overview">Přehled</button><button data-dt="io">Vstupy / výstupy</button><button data-dt="motor">Test motoru</button><button data-dt="system">Systém</button><button data-dt="log">Log</button>
+        </div>
+      </div>
+      <div id="dt-overview" class="two" style="display:grid;gap:10px">
+        <div class="panel">
+          <h2>Řízení (LinuxCNC)</h2>
+          <div class="row"><span class="pill" id="dRuntime">…</span><span class="muted mono" id="dUptime"></span></div>
+          <div class="row">
+            <button class="btn good" id="rtStart">Spustit</button>
+            <button class="btn" id="rtRestart">Restartovat</button>
+            <button class="btn danger" id="rtStop">Zastavit</button>
+          </div>
+          <div class="note" id="rtNote" hidden></div>
+          <h2>Deska EC300</h2>
+          <dl class="kv" id="dBoard"></dl>
+        </div>
+        <div class="panel">
+          <h2>Alarmy a zprávy</h2>
+          <div class="msgs" id="msgList"><div class="empty">Žádné zprávy.</div></div>
+        </div>
+      </div>
+      <div id="dt-io" class="panel" hidden>
+        <h2>Vstupy <span class="right muted" id="ioSrc"></span></h2>
+        <div class="leds" id="ioIn"></div>
+        <h2>Výstupy <span class="right muted">klepnutím přepneš (správce, řízení zastaveno)</span></h2>
+        <div class="leds" id="ioOut"></div>
+        <h2>PWM vřetena (0–10 V)</h2>
+        <div class="ovr"><label for="ioPwm">PWM</label><input type="range" id="ioPwm" min="0" max="100" value="0"><output id="ioPwmOut">0 %</output></div>
+      </div>
+      <div id="dt-motor" class="panel" hidden>
+        <h2>Test motoru bez LinuxCNC</h2>
+        <div class="note warn">Motor se točí jen při držení tlačítka. Deska ho sama zastaví do 5 ms po výpadku spojení. Hardwarový E-stop musí odpojit drivery nezávisle.</div>
+        <div class="row"><span class="h2">Osa</span><div class="seg" id="motorAxis"></div></div>
+        <div class="ovr" style="grid-template-columns:auto 1fr 110px"><label for="motorHz">Frekvence</label><input type="range" id="motorHz" min="100" max="5000" step="100" value="1000"><output id="motorHzOut"></output></div>
+        <div class="row">
+          <button class="jog" style="min-height:90px;flex:1" data-motor="-1">◀ Vzad</button>
+          <button class="jog" style="min-height:90px;flex:1" data-motor="1">Vpřed ▶</button>
+        </div>
+        <dl class="kv"><dt>Počet kroků</dt><dd id="motorCount">0</dd><dt>Ujetá dráha</dt><dd id="motorDist">–</dd></dl>
+        <div class="muted" style="font-size:13px">Kalibrace: změř skutečnou dráhu a porovnej s „Ujetá dráha“ (počítá se z nastavených kroků na mm).</div>
+      </div>
+      <div id="dt-system" class="two" style="gap:10px" hidden>
+        <div class="panel"><h2>Raspberry Pi</h2><dl class="kv" id="sysInfo"></dl></div>
+        <div class="panel">
+          <h2>Test latence</h2>
+          <div class="muted">Měří zpoždění real-time jádra (cyclictest). Do 50 µs výborné, do 100 µs v pořádku pro servo thread 1 ms.</div>
+          <div class="row"><button class="btn" data-latency="30">30 s</button><button class="btn" data-latency="300">5 min</button></div>
+          <h2>Poslední úloha</h2>
+          <pre class="log" id="jobLog">–</pre>
+        </div>
+      </div>
+      <div id="dt-log" class="panel" hidden>
+        <h2>Log LinuxCNC</h2>
+        <pre class="log" id="rtLog">–</pre>
+      </div>
+    </section>
+
+    <!-- F6 SOUBORY -->
+    <section class="screen two" id="s-files" hidden>
+      <div class="panel">
+        <h2>Programy <span class="right"><label class="btn xs primary" for="upload">Nahrát z tabletu</label></span></h2>
+        <input type="file" id="upload" accept=".ngc,.nc,.tap,.gcode,.txt" hidden>
+        <div class="list" id="fileList"><div class="empty">Načítám…</div></div>
+      </div>
+      <div class="panel">
+        <h2>Náhled <span class="right mono" id="fileSel"></span></h2>
+        <div class="tp" id="fileTp" style="min-height:320px"><canvas></canvas>
+          <div class="tpbar"><button class="btn xs" data-view="top">Shora</button><button class="btn xs" data-view="iso">Izo</button><button class="btn xs" data-view="fit">Celé</button></div>
+          <div class="tpinfo" id="fileTpInfo"></div>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="fileLoad" disabled>Načíst do řízení</button>
+          <span class="spacer"></span>
+          <button class="btn danger" id="fileDel" disabled>Smazat</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="nav" id="nav">
+    <button data-s="setup"><span>Nastavení</span><small>F1</small></button>
+    <button data-s="run" class="on"><span>Běh</span><small>F2</small></button>
+    <button data-s="jog"><span>Jog</span><small>F3</small></button>
+    <button data-s="tools"><span>Nástroje</span><small>F4</small></button>
+    <button data-s="diag"><span>Diagnostika</span><small>F5</small></button>
+    <button data-s="files"><span>Soubory</span><small>F6</small></button>
+  </nav>
+</div>
+
+<!-- přihlášení -->
+<div class="modal" id="loginModal" hidden>
+  <form class="dialog" id="loginForm">
+    <h3>Přihlášení</h3>
+    <div class="seg" id="loginRole"><button type="button" data-role="operator" class="on">Obsluha</button><button type="button" data-role="admin">Správce</button></div>
+    <div class="field"><label for="loginPw">Heslo</label><input class="inp" type="password" id="loginPw" autocomplete="current-password"></div>
+    <div class="row"><button class="btn primary" type="submit">Přihlásit</button><button class="btn" type="button" id="loginCancel">Zrušit</button><span class="spacer"></span><button class="btn ghost" type="button" id="logout">Odhlásit</button></div>
+  </form>
+</div>
+
+<!-- první spuštění -->
+<div class="modal" id="firstModal" hidden>
+  <form class="dialog" id="firstForm">
+    <h3>Vítej v OpenCNC Web</h3>
+    <div class="muted">Nastav heslo správce. Správce může měnit nastavení stroje, testovat výstupy a aktualizovat systém.</div>
+    <div class="field"><label for="firstAdmin">Heslo správce (min. 4 znaky)</label><input class="inp" type="password" id="firstAdmin" autocomplete="new-password" required minlength="4"></div>
+    <div class="field"><label for="firstOperator">Heslo obsluhy</label><input class="inp" type="password" id="firstOperator" autocomplete="new-password"><small>Nech prázdné, pokud má obsluha pracovat bez přihlášení.</small></div>
+    <div><button class="btn primary" type="submit">Uložit a pokračovat</button></div>
+  </form>
+</div>
+
+<!-- úloha -->
+<div class="modal" id="jobModal" hidden>
+  <div class="dialog wide">
+    <h3 id="jobTitle">Úloha</h3>
+    <pre class="log" id="jobModalLog"></pre>
+    <div class="row"><span class="pill" id="jobState">běží</span><span class="spacer"></span><button class="btn" id="jobClose">Zavřít</button></div>
+  </div>
+</div>
+
+<!-- náhled vygenerovaných souborů -->
+<div class="modal" id="fileModal" hidden>
+  <div class="dialog wide">
+    <h3 id="fileModalTitle"></h3>
+    <pre class="log" id="fileModalText"></pre>
+    <div class="row"><span class="spacer"></span><button class="btn" id="fileModalClose">Zavřít</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<div class="offline" id="offline" hidden>Spojení s řídicí jednotkou ztraceno<small>Ruční posuv se zastavil. Zkouším se znovu připojit…</small></div>
+
+<script src="/toolpath.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

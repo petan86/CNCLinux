@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenCNC Web - webové řízení CNC (LinuxCNC + Remora)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Environment=HOME=@HOME@
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=@REPO@/backend
+ExecStart=/usr/bin/python3 -m cnclinux --data @HOME@/cnclinux --port @PORT@ --autostart
+# port 80 bez běhu pod rootem
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
+RestartSec=3
+# při zastavení služby nejdřív korektně ukončit LinuxCNC
+KillMode=mixed
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target
