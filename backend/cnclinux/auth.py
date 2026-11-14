@@ -93,7 +93,7 @@ class Auth:
                 return s["role"]
             if s:
                 self.sessions.pop(token, None)
-        if not self.needs_setup() and not self.operator_required():
+        if not self.operator_required():
             return "operator"
         return None
 

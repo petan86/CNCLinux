@@ -8,6 +8,7 @@ const Toolpath = (() => {
   function parse(text) {
     const P = [], T = [], L = [];          // body (6 čísel na segment), typ (0 rychloposuv, 1 řez), řádek
     let x = 0, y = 0, z = 0, abs = true, sc = 1, motion = 0, plane = 17, count = 0;
+    let cR = 0, cZ = 0, cInit = 0, retractR = false;          // vrtací cykly G81/G82/G83/G73
     const lines = text.split("\n");
     for (let li = 0; li < lines.length && count < MAX_SEG; li++) {
       const raw = lines[li].toUpperCase().replace(/\(.*?\)/g, "").replace(/;.*/, "").replace(/\s+/g, "");
@@ -29,8 +30,27 @@ const Toolpath = (() => {
         else if (g === 17 || g === 18 || g === 19) plane = g;
         else if ([4, 10, 28, 30, 53, 92].includes(Math.floor(g))) skip = true;
         else if (g === 80) motion = -1;
+        else if ([73, 81, 82, 83, 85, 89].includes(g)) { if (motion !== 81) cInit = z; motion = 81; }
+        else if (g === 98) retractR = false;
+        else if (g === 99) retractR = true;
       }
       if (skip || motion < 0) continue;
+      if (motion === 81) {
+        if ("R" in w) cR = w.R * sc;
+        if ("Z" in w) cZ = w.Z * sc;
+        if (!("X" in w || "Y" in w)) continue;
+        const hx = "X" in w ? (abs ? w.X * sc : x + w.X * sc) : x;
+        const hy = "Y" in w ? (abs ? w.Y * sc : y + w.Y * sc) : y;
+        const top = Math.max(cInit, cR);
+        const seg = (a, b, c, d, e, f2, ty) => { P.push(a, b, c, d, e, f2); T.push(ty); L.push(li + 1); count++; };
+        seg(x, y, z, hx, hy, z, 0);
+        if (z !== cR) seg(hx, hy, z, hx, hy, cR, 0);
+        seg(hx, hy, cR, hx, hy, cZ, 1);
+        const back = retractR ? cR : top;
+        seg(hx, hy, cZ, hx, hy, back, 0);
+        x = hx; y = hy; z = back;
+        continue;
+      }
       if (!("X" in w || "Y" in w || "Z" in w)) continue;
       const nx = "X" in w ? (abs ? w.X * sc : x + w.X * sc) : x;
       const ny = "Y" in w ? (abs ? w.Y * sc : y + w.Y * sc) : y;
@@ -129,7 +149,7 @@ const Toolpath = (() => {
       // osy obrobku v nule
       const axLen = data ? (Math.max(data.bounds[3] - data.bounds[0], data.bounds[4] - data.bounds[1], data.bounds[5] - data.bounds[2]) || 50) * 0.15 : 20;
       const o = proj(0, 0, 0);
-      [[axLen, 0, 0, "#f0504f"], [0, axLen, 0, "#3fb950"], [0, 0, axLen, "#58a6ff"]].forEach(([X, Y, Z, c]) => {
+      [[axLen, 0, 0, "#ff4a4a"], [0, axLen, 0, "#3ccf5a"], [0, 0, axLen, "#22d3e6"]].forEach(([X, Y, Z, c]) => {
         const e = proj(X, Y, Z);
         ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(e[0], e[1]); ctx.stroke();
       });
@@ -148,9 +168,9 @@ const Toolpath = (() => {
           }
           ctx.stroke(); ctx.setLineDash([]);
         };
-        pass((ty) => ty === 0, "rgba(139,149,161,.55)", 1, [4, 4]);
-        pass((ty, ln) => ty === 1 && ln >= line, "#ffa31a", 1.5, []);
-        if (line > 0) pass((ty, ln) => ty === 1 && ln < line, "#3fb950", 1.5, []);
+        pass((ty) => ty === 0, "rgba(235,245,248,.65)", 1, [2, 4]);
+        pass((ty, ln) => ty === 1 && ln >= line, "#ffd23f", 1.5, []);
+        if (line > 0) pass((ty, ln) => ty === 1 && ln < line, "#3ccf5a", 1.8, []);
       }
       if (tool) {
         const [tx, ty] = proj(tool[0], tool[1], tool[2]);

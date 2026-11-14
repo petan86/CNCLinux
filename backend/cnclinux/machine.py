@@ -128,6 +128,10 @@ class Machine:
                 "dro": dro, "units": "mm" if abs(s.linear_units - 1.0) < 1e-3 else "in",
                 "g5x_index": s.g5x_index,
                 "tool": s.tool_in_spindle,
+                "gcodes": self._active_gcodes(),
+                "flood": bool(getattr(s, "flood", 0)), "mist": bool(getattr(s, "mist", 0)),
+                "g5x_offset": [round(s.g5x_offset[i], 4) for i in axes],
+                "feedrate_cmd": round(getattr(s, "current_vel", 0.0) * 60.0, 1),
                 "feed_override": s.feedrate, "rapid_override": s.rapidrate,
                 "max_feed_override": self.max_feed_override, "max_spindle_override": self.max_spindle_override,
                 "spindle": {"speed": sp.get("speed", 0.0), "override": sp.get("override", 1.0),
@@ -137,6 +141,44 @@ class Machine:
                 "max_jog_velocity": self.max_lin_vel,
                 "jogging": self.jog is not None,
             }
+
+    def _active_gcodes(self):
+        """Aktivní modální G-kódy pro lištu pod náhledem (pohyb, rovina, souřadnice, jednotky, korekce)."""
+        names = {0: "G0 Rychloposuv", 10: "G1 Lineární", 20: "G2 Oblouk CW", 30: "G3 Oblouk CCW", 800: "G80",
+                 170: "G17 XY", 180: "G18 XZ", 190: "G19 YZ", 900: "G90 Absolutně", 910: "G91 Přírůstkově",
+                 940: "G94 mm/min", 930: "G93 Inverzní", 200: "G20 palce", 210: "G21 mm",
+                 400: "G40 Bez korekce", 410: "G41 Korekce L", 420: "G42 Korekce P",
+                 430: "G43 Délka nástroje", 490: "G49 Bez délky"}
+        out = []
+        for g in getattr(self.s, "gcodes", ())[1:]:
+            if g in names and names[g] not in out:
+                out.append(names[g])
+        return out
+
+    def read_offsets(self):
+        """G54-G59 z linuxcnc.var (parametry 5221...); aktivní systém živě z LinuxCNC."""
+        with self.lock:
+            self.s.poll()
+            axes = self._axes()
+            active = self.s.g5x_index
+            live = list(self.s.g5x_offset)
+        params = {}
+        var = os.path.join(self.config_dir, self.ini.find("RS274NGC", "PARAMETER_FILE") or "linuxcnc.var")
+        try:
+            with open(var, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0].isdigit():
+                        params[int(parts[0])] = float(parts[1])
+        except (OSError, ValueError):
+            pass
+        rows = []
+        for n in range(1, 7):
+            base = 5221 + (n - 1) * 20
+            vals = [live[i] if n == active else params.get(base + i, 0.0) for i in axes]
+            rows.append({"index": n, "name": "G%d" % (53 + n), "active": n == active,
+                         "values": [round(v, 4) for v in vals]})
+        return {"axes": [AXES[i] for i in axes], "rows": rows}
 
     def hal_inputs(self, count):
         """Stav vstupů remora.input.NN, když běží LinuxCNC."""
@@ -248,6 +290,37 @@ class Machine:
                 c.mdi(["G54", "G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3"][n - 1])
                 self._wait()
                 self._set_mode(lc.MODE_MANUAL)
+            elif cmd == "set_offset":
+                n, axis = int(a["index"]), int(a["axis"])
+                if not 1 <= n <= 6:
+                    raise UserError("Neplatný souřadný systém.")
+                self._require_on(); self._require_idle(); self._require_homed("Pracovní offset")
+                self._set_mode(lc.MODE_MDI)
+                c.mdi("G10 L2 P%d %s%.4f" % (n, AXES[axis], float(a["value"])))
+                self._wait()
+                self._set_mode(lc.MODE_MANUAL)
+            elif cmd == "goto_origin":
+                # bezpečně: nejdřív Z nahoru do strojní nuly, pak XY na nulu obrobku
+                self._require_on(); self._require_idle(); self._require_homed("Najetí na nulu")
+                self._set_mode(lc.MODE_MDI)
+                c.mdi("G53 G0 Z0")
+                self._wait()
+                c.mdi("G0 X0 Y0")
+            elif cmd == "spindle":
+                d = a.get("dir")
+                self._require_on(); self._require_idle(); self._require_homed("Vřeteno")
+                self._set_mode(lc.MODE_MDI)
+                if d == "stop":
+                    c.mdi("M5")
+                else:
+                    rpm = float(a.get("rpm", 0))
+                    if rpm <= 0:
+                        raise UserError("Zadej otáčky vřetena.")
+                    c.mdi("%s S%d" % ("M3" if d == "cw" else "M4", int(rpm)))
+            elif cmd == "coolant":
+                self._require_on(); self._require_idle(); self._require_homed("Chlazení")
+                self._set_mode(lc.MODE_MDI)
+                c.mdi("M8" if a.get("on") else "M9")
             elif cmd == "tool_change":
                 n = int(a["tool"])
                 self._require_on(); self._require_idle(); self._require_homed("Výměna nástroje")

@@ -22,7 +22,8 @@ FRONTEND = os.path.join(os.path.dirname(os.path.dirname(HERE)), "frontend")
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "application/javascript; charset=utf-8"),
           "/app.css": ("app.css", "text/css; charset=utf-8"),
-          "/toolpath.js": ("toolpath.js", "application/javascript; charset=utf-8")}
+          "/toolpath.js": ("toolpath.js", "application/javascript; charset=utf-8"),
+          "/wizards.js": ("wizards.js", "application/javascript; charset=utf-8")}
 MAX_UPLOAD = 30 * 1024 * 1024
 PROGRAM_EXT = (".ngc", ".nc", ".tap", ".gcode", ".txt")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9._\- ]{1,120}$")
@@ -145,8 +146,8 @@ def make_handler(app):
 
         def _need(self, needed):
             role = self._role()
-            if app.auth.needs_setup():
-                self._send(403, {"ok": False, "error": "Nejdřív nastav heslo správce.", "needs_setup": True})
+            if needed == "admin" and app.auth.needs_setup():
+                self._send(403, {"ok": False, "error": "Nejdřív nastav heslo správce (F1 Nastavení).", "needs_setup": True})
                 return None
             if not app.auth.allows(role, needed):
                 self._send(401 if role is None else 403,
@@ -245,6 +246,8 @@ def make_handler(app):
                     from .machine import Machine
                     tt = os.path.join(app.runtime.machine_dir, "tool.tbl")
                     return self._ok(tools=Machine.read_tools(type("T", (), {"tool_table_path": tt})()))
+                if url.path == "/api/offsets":
+                    return self._ok(**self._machine().read_offsets())
                 if url.path == "/api/diag":
                     bs = dict(app.board_state)
                     mach = app.runtime.load_machine()
@@ -268,8 +271,7 @@ def make_handler(app):
                 if url.path == "/api/job":
                     return self._ok(job=app.jobs.get(q.get("id", [None])[0]))
                 if url.path == "/api/setup":
-                    if not self._need("admin"):
-                        return
+                    # čtení nastavení smí i obsluha (jen pro čtení), změny jen správce
                     current = app.runtime.load_machine()
                     return self._ok(machine=current or configgen.default_machine(), configured=current is not None,
                                     inputs=[{"bit": b, "terminal": t} for b, t, _ in configgen.EC300_INPUTS],

@@ -45,7 +45,7 @@ def main():
                       on_message=lambda k, t: holder["app"].message(k, t) if "app" in holder else None)
     app = App(runtime, board, Auth(os.path.join(args.data, "auth.json")), args.demo)
     holder["app"] = app
-    if args.autostart and runtime.is_configured():
+    if (args.autostart or args.demo) and runtime.is_configured() and not runtime.commissioning_pending():
         try:
             runtime.start()
         except Exception as e:

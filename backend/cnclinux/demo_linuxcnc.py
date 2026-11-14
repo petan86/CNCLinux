@@ -30,6 +30,7 @@ class _Sim:
         self.jog = None          # (axis, vel)
         self.errors = []
         self.tool = 0
+        self.flood = 0
         self.step_once = False
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -81,6 +82,12 @@ class _Sim:
         s = re.search(r"S\s*([\d.]+)", t)
         if s:
             self.spindle_speed = float(s.group(1))
+        if re.search(r"M0?8\b", t):
+            self.flood = 1
+        if re.search(r"M0?9\b", t):
+            self.flood = 0
+        if re.search(r"G10\s*L2\s*P", t):
+            return
         if re.search(r"M0?3\b", t):
             self.spindle_dir = 1
         if re.search(r"M0?5\b", t) or re.search(r"M0?2\b", t):
@@ -99,6 +106,10 @@ class stat:
         with s.lock:
             self.ini_filename = ""
             self.tool_in_spindle = s.tool
+            self.gcodes = (0, 10 if s.interp_state != INTERP_IDLE else 0, 170, 900, 940, 210, 400, 490, 800)
+            self.flood = s.flood
+            self.mist = 0
+            self.current_vel = 13.3 if s.interp_state == INTERP_READING else 0.0
             self.limit = (0,) * 16
             self.task_state, self.task_mode, self.interp_state = s.task_state, s.task_mode, s.interp_state
             self.estop = 1 if s.task_state == STATE_ESTOP else 0
