@@ -54,7 +54,8 @@ echo "  Aktivuje se po restartu."
 if [ "$WIFI_MODE" = "hotspot" ] || [ "$WIFI_MODE" = "fallback" ]; then
     say "Wi-Fi hotspot '$WIFI_SSID' pro tablet ($WIFI_MODE)"
     if [ -z "${WIFI_PASS:-}" ]; then
-        WIFI_PASS="$(tr -dc 'a-km-np-z2-9' </dev/urandom | head -c 10)"
+        # (tr </dev/urandom | head by s pipefail skončilo chybou SIGPIPE)
+        WIFI_PASS="$(python3 -c 'import secrets; a="abcdefghjkmnpqrstuvwxyz23456789"; print("".join(secrets.choice(a) for _ in range(10)))')"
     fi
     [ "${#WIFI_PASS}" -ge 8 ] || die "WIFI_PASS musí mít alespoň 8 znaků."
     for old in cnclinux-ap opencnc-ap; do
