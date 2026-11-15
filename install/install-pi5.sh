@@ -58,7 +58,7 @@ if [ "$WIFI_MODE" = "hotspot" ] || [ "$WIFI_MODE" = "fallback" ]; then
     fi
     [ "${#WIFI_PASS}" -ge 8 ] || die "WIFI_PASS musí mít alespoň 8 znaků."
     for old in cnclinux-ap opencnc-ap; do
-        nmcli -t -f NAME con show | grep -qx "$old" && nmcli con delete "$old" >/dev/null
+        if nmcli -t -f NAME con show | grep -qx "$old"; then nmcli con delete "$old" >/dev/null; fi
     done
     if [ "$WIFI_MODE" = "hotspot" ]; then AUTO="yes"; else AUTO="no"; fi
     nmcli con add type wifi ifname wlan0 con-name opencnc-ap autoconnect "$AUTO" ssid "$WIFI_SSID" \
