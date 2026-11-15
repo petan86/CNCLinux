@@ -7,8 +7,11 @@
 # Použití (z adresáře repozitáře):
 #   sudo ./install/install-pi5.sh
 # Volby přes proměnné prostředí:
-#   WIFI_MODE=hotspot|none   (hotspot: Pi vytvoří vlastní Wi-Fi pro tablet, bez internetu;
-#                             none: Pi zůstane v domácí/dílenské Wi-Fi a tablet se připojí přes ni)
+#   WIFI_MODE=fallback|hotspot|none
+#       fallback (výchozí): Pi používá domácí/dílenskou Wi-Fi; když žádná známá síť není
+#                 dostupná, spustí vlastní hotspot (http://192.168.50.1/)
+#       hotspot:  Pi vždy vytvoří vlastní Wi-Fi pro tablet, bez internetu
+#       none:     jen domácí/dílenská Wi-Fi
 #   WIFI_SSID=OpenCNC  WIFI_PASS=<heslo, min. 8 znaků>
 #   ETH_IF=eth0              rozhraní k EC300
 #   HTTP_PORT=80
@@ -17,7 +20,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_NAME="${SUDO_USER:-$(logname 2>/dev/null || echo pi)}"
 USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
-WIFI_MODE="${WIFI_MODE:-hotspot}"
+WIFI_MODE="${WIFI_MODE:-fallback}"
 WIFI_SSID="${WIFI_SSID:-OpenCNC}"
 ETH_IF="${ETH_IF:-eth0}"
 HTTP_PORT="${HTTP_PORT:-80}"
@@ -48,17 +51,33 @@ nmcli con add type ethernet ifname "$ETH_IF" con-name ec300 \
 # neaktivovat hned: instalace může běžet přes SSH na stejném rozhraní, platí po restartu
 echo "  Aktivuje se po restartu."
 
-if [ "$WIFI_MODE" = "hotspot" ]; then
-    say "Wi-Fi hotspot '$WIFI_SSID' pro tablet"
+if [ "$WIFI_MODE" = "hotspot" ] || [ "$WIFI_MODE" = "fallback" ]; then
+    say "Wi-Fi hotspot '$WIFI_SSID' pro tablet ($WIFI_MODE)"
     if [ -z "${WIFI_PASS:-}" ]; then
         WIFI_PASS="$(tr -dc 'a-km-np-z2-9' </dev/urandom | head -c 10)"
     fi
-    nmcli -t -f NAME con show | grep -qx cnclinux-ap && nmcli con delete cnclinux-ap >/dev/null
-    nmcli con add type wifi ifname wlan0 con-name cnclinux-ap autoconnect yes ssid "$WIFI_SSID" \
+    [ "${#WIFI_PASS}" -ge 8 ] || die "WIFI_PASS musí mít alespoň 8 znaků."
+    for old in cnclinux-ap opencnc-ap; do
+        nmcli -t -f NAME con show | grep -qx "$old" && nmcli con delete "$old" >/dev/null
+    done
+    if [ "$WIFI_MODE" = "hotspot" ]; then AUTO="yes"; else AUTO="no"; fi
+    nmcli con add type wifi ifname wlan0 con-name opencnc-ap autoconnect "$AUTO" ssid "$WIFI_SSID" \
         802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared ipv4.addresses 192.168.50.1/24 \
         wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASS" connection.autoconnect-priority 100 >/dev/null
-    # neaktivovat hned: odpojilo by to SSH přes Wi-Fi uprostřed instalace, platí po restartu
-    echo "  Hotspot se zapne po restartu (domácí Wi-Fi pak Pi nepoužívá)."
+    if [ "$WIFI_MODE" = "fallback" ]; then
+        # hotspot jen když není dostupná žádná známá Wi-Fi
+        sed "s|@REPO@|$REPO|g" "$REPO/install/opencnc-wifi-fallback.service" > /etc/systemd/system/opencnc-wifi-fallback.service
+        systemctl daemon-reload
+        systemctl enable opencnc-wifi-fallback.service
+        systemctl restart opencnc-wifi-fallback.service
+        echo "  Záložní hotspot se zapne, když Pi do minuty nenajde známou Wi-Fi."
+    else
+        systemctl disable --now opencnc-wifi-fallback.service 2>/dev/null || true
+        # neaktivovat hned: odpojilo by to SSH přes Wi-Fi uprostřed instalace, platí po restartu
+        echo "  Hotspot se zapne po restartu (domácí Wi-Fi pak Pi nepoužívá)."
+    fi
+else
+    systemctl disable --now opencnc-wifi-fallback.service 2>/dev/null || true
 fi
 
 say "Oprávnění (sudoers) pro aktualizace a test latence"
@@ -89,7 +108,9 @@ IP_WIFI="192.168.50.1"
 echo
 echo "Hotovo."
 echo "  Webové rozhraní:  http://$(hostname).local$( [ "$HTTP_PORT" = 80 ] || echo ":$HTTP_PORT")/"
-[ "$WIFI_MODE" = "hotspot" ] && echo "  Wi-Fi pro tablet: $WIFI_SSID / heslo: $WIFI_PASS  ->  http://$IP_WIFI$( [ "$HTTP_PORT" = 80 ] || echo ":$HTTP_PORT")/"
+if [ "$WIFI_MODE" = "hotspot" ] || [ "$WIFI_MODE" = "fallback" ]; then
+    echo "  Wi-Fi pro tablet$( [ "$WIFI_MODE" = fallback ] && echo " (záložní)"): $WIFI_SSID / heslo: $WIFI_PASS  ->  http://$IP_WIFI$( [ "$HTTP_PORT" = 80 ] || echo ":$HTTP_PORT")/"
+fi
 echo "  EC300:            10.10.10.10 na $ETH_IF (Pi má 10.10.10.11)"
 echo "  Volitelně flash EC300 z Pi:  sudo -u $USER_NAME pipx install pyocd"
 echo "  Doporučení: restartuj Pi (sudo reboot), pak otevři webové rozhraní a nastav heslo správce."

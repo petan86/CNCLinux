@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenCNC Web - záložní Wi-Fi hotspot, když není dostupná známá síť
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash @REPO@/install/opencnc-wifi-fallback.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
