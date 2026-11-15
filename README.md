@@ -12,14 +12,27 @@ stroje probíhá přes prohlížeč na tabletu, bez ruční úpravy souborů HAL
 
 ## Co umí (v0.1)
 
+Rozhraní je uspořádané jako průmyslový řídicí systém:
+
+- **Nahoře:** stavový řádek a záložky F1–F6.
+- **Vlevo:** 3D náhled drah s lištou aktivních G-kódů.
+- **Vpravo:**
+  - stavové dlaždice Připraven / Deska / E-stop;
+  - velké souřadnice s tlačítkem NULA;
+  - posuv, nástroj, vřeteno a strojní souřadnice;
+  - ovládání podle záložky.
+
 | Obrazovka | Funkce |
 |---|---|
-| **F1 Nastavení** (správce) | Průvodce v 5 krocích: osy, motory (kroky, mikrokroky, stoupání, časování STEP/DIR), dráha a referování, přiřazení vstupů a výstupů EC300 s živým stavem svorek, vřeteno. Kontrola konfliktů a frekvence kroků, přehled změn, náhled vygenerovaných souborů, zálohy a návrat k poslední funkční konfiguraci, aktualizace, hesla. |
-| **F2 Běh** | Velké DRO, 3D náhled drah s průběhem obrábění a polohou nástroje, start, pauza, krok, stop, override posuvu, rychloposuvu a vřetena. |
-| **F3 Jog** | Plynulý jog s deadman signálem nebo krokování 0,01–10 mm, referování, nulové body, G54–G59, MDI s historií. |
-| **F4 Nástroje** | Tabulka nástrojů, výměna M6 + G43. |
-| **F5 Diagnostika** | Spuštění a zastavení LinuxCNC, stav desky a odezva, živé vstupy, test výstupů a PWM, test motoru bez LinuxCNC, test latence, informace o Pi, log. |
-| **F6 Soubory** | Nahrání G-kódu z tabletu, náhled, načtení do řízení. |
+| **F1 Nastavení** | Menu sekcí: obecné, každá osa zvlášť (motor, převod, rychlost, softwarové limity, referování, časování STEP/DIR, test motoru), vřeteno, vstupy a výstupy EC300 s živým stavem svorek, řízení a deska, systém a test latence, aktualizace (systém, komponenta Remora, firmware EC300 přes SWD), zálohy s návratem k poslední funkční konfiguraci, heslo správce, kontrola a uložení s přehledem změn. Bez hesla jen pro čtení. |
+| **F2 Program a MDI** | Výpis G-kódu s aktuálním řádkem a průběhem, korekce posuvu, rychloposuvu a vřetena, vřeteno M3/M4/M5, chlazení, najetí na nulu obrobku, spuštění od řádku, jeden blok, START / PAUZA / STOP, MDI. |
+| **F3 Ruční posuv** | Krokový režim (1 / 0,5 / 0,1 / 0,01 mm) nebo plynulý s deadman signálem, rychlost, otočné osy, referování podržením tlačítka, zapnutí stroje. |
+| **F4 Nástroje a offsety** | Tabulka nástrojů (délka, průměr, název), výměna M6 + G43, pracovní offsety G54–G59 s úpravou a aktivací. |
+| **F5 Průvodci** | Programy bez CAM: zarovnání plochy, obdélníková kapsa, kruhová kapsa, vrtání v mřížce (G81/G83), s živým náhledem. |
+| **F6 Soubory** | Nahrání G-kódu z tabletu, náhled drah, úprava v editoru, načtení do řízení, mazání. |
+
+Ovládání stroje nevyžaduje přihlášení. Heslo správce chrání jen změny v F1, testy výstupů a motorů a aktualizace.
+Klávesnice: F1–F6 přepínají obrazovky, Esc pozastaví běžící program.
 
 Bezpečnostní zásady v kódu:
 
@@ -46,7 +59,7 @@ Tablet (prohlížeč)  ──Wi-Fi──  Raspberry Pi 5  ──Ethernet──  
 
 ```
 backend/cnclinux/   server (REST), runtime (LinuxCNC), configgen, board (UDP/TFTP), system, auth, demo
-frontend/           index.html, app.js, app.css, toolpath.js (3D náhled bez knihoven)
+frontend/           index.html, app.js, app.css, toolpath.js (3D náhled bez knihoven), wizards.js (průvodci F5)
 hal/                remora-eth-3.0.c s opravami (viz firmware/)
 firmware/           patch oprav firmwaru Remora-RT1052
 install/            instalace pro Raspberry Pi 5, systemd služba, sudoers
@@ -68,17 +81,44 @@ Pak otevři `http://localhost:8080/`.
 
 ## Instalace na Raspberry Pi 5
 
-1. Nahraj na SD kartu nebo NVMe **oficiální image LinuxCNC 2.9 pro Raspberry Pi 4/5** (Debian 12, jádro PREEMPT_RT) z [linuxcnc.org/downloads](https://linuxcnc.org/downloads/).
-2. Propoj Pi a EC300 ethernetovým kabelem. Pi má adresu 10.10.10.11, EC300 má 10.10.10.10.
-3. Spusť instalaci:
+Doporučená cesta je oficiální image LinuxCNC, ze kterého instalační skript udělá systém bez grafiky.
+
+1. **Image.** Stáhni **LinuxCNC 2.9.x pro Raspberry Pi 4/5** (Debian 12 Bookworm, jádro PREEMPT_RT) z [linuxcnc.org/downloads](https://linuxcnc.org/downloads/). Nahraj ho v Raspberry Pi Imageru přes *Use custom* na SD kartu (min. 32 GB, A2) nebo NVMe.
+2. **První spuštění.** Připoj Pi k monitoru, klávesnici a k domácí Wi-Fi. Ethernet nech volný, bude patřit EC300.
    ```
+   sudo apt update && sudo apt -y upgrade
+   sudo systemctl enable --now ssh
+   uname -a        # musí obsahovat PREEMPT_RT
+   ```
+3. **Instalace OpenCNC Web:**
+   ```
+   sudo apt install -y git
    git clone https://github.com/petan86/CNCLinux.git
    cd CNCLinux
-   sudo WIFI_PASS=tajneheslo ./install/install-pi5.sh
+   sudo WIFI_MODE=hotspot WIFI_PASS=tvojeheslo ./install/install-pi5.sh
    sudo reboot
    ```
-   Skript přepne Pi na start bez grafiky, přeloží komponentu Remora, nastaví `eth0` pro EC300, vytvoří Wi-Fi hotspot `OpenCNC` pro tablet a spustí službu `cnclinux`.
-4. Na tabletu se připoj k Wi-Fi `OpenCNC`, otevři `http://192.168.50.1/`, nastav heslo správce a projdi průvodce v F1.
+   Skript udělá tohle:
+   - přepne Pi na start bez grafiky;
+   - přeloží komponentu Remora;
+   - připraví `eth0` pro EC300 (10.10.10.11/24);
+   - nastaví Wi-Fi;
+   - spustí službu `cnclinux` na portu 80.
+
+   Síťová nastavení se zapnou až po restartu, takže instalace může běžet přes SSH.
+
+   Volba Wi-Fi:
+   - **`WIFI_MODE=hotspot`:** Pi vytvoří vlastní Wi-Fi `OpenCNC` (heslo min. 8 znaků). Tablet se připojí přímo k Pi, ale Pi pak nemá internet pro aktualizace.
+   - **`WIFI_MODE=none`:** Pi zůstane v domácí nebo dílenské Wi-Fi a tablet se připojí přes ni.
+4. **Zapojení.** Po restartu propoj Pi a EC300 ethernetovým kabelem (EC300 má 10.10.10.10).
+5. **Tablet.** Otevři `http://192.168.50.1/` (hotspot) nebo `http://<název-pi>.local/` (domácí Wi-Fi). V F1 nastav heslo správce a projdi sekce shora dolů.
+6. **Před prvním pohybem:**
+   - F1 → Systém a latence: RT jádro „ano“, latence pod 100 µs.
+   - F1 → Řízení a deska: deska odpovídá.
+   - F1 → Vstupy a výstupy: E-stop a koncové spínače reagují.
+   - V sekcích os proveď test motoru, nejdřív bez mechanické zátěže.
+
+Jiné cesty, například Raspberry Pi OS Lite s vlastním RT jádrem nebo Debian na PC (x86), zatím nejsou otestované.
 
 ### Firmware EC300
 
@@ -102,9 +142,9 @@ Opravy v [firmware/](firmware/) doporučuji: přetečení bufferu UDP, větší 
 
 | Verze | Obsah |
 |---|---|
-| v0.1 | Headless LinuxCNC, webový dashboard, souřadnice, diagnostika, konfigurátor, jog, G-kód a 2D/3D náhled (tato verze, experimentální) |
-| v0.2 | Ověření na stroji s EC300, ruční výměna nástroje s dialogem, sondování, WebSocket místo dotazování |
-| v0.3 | Další desky (EC500, Mesa), osa C a gantry (dva motory na osu), konverzační průvodci |
+| v0.1 | Headless LinuxCNC, rozhraní F1–F6, konfigurátor, diagnostika, jog, G-kód, 3D náhled, průvodci (tato verze, experimentální) |
+| v0.2 | Ověření na stroji s EC300, ruční výměna nástroje s dialogem, sondování, WebSocket místo dotazování, další průvodci (profil, závit) |
+| v0.3 | Další desky (EC500, Mesa), osa C a gantry (dva motory na osu), instalace na Raspberry Pi OS Lite a Debian na PC |
 
 ## Licence
 
