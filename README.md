@@ -122,7 +122,8 @@ Jiné cesty, například Raspberry Pi OS Lite s vlastním RT jádrem nebo Debian
 
 ### Firmware EC300
 
-EC300 musí mít firmware Remora-RT1052 3.1.x. Postup:
+EC300 musí mít firmware Remora-RT1052 3.1.x. Podrobný návod se schématem zapojení
+Raspberry Pi Pico je v [docs/flash-ec300.md](docs/flash-ec300.md). Ve zkratce:
 
 - Nahraj ho přes SWD, například Raspberry Pi Pico s firmwarem debugprobe a pyOCD (target `mimxrt1050_quadspi`, adresa `0x60000000`).
 - Při prvním nahrání smaž celou flash (`-e chip`), aby v ní nezůstala data původního Mach3 firmwaru.
