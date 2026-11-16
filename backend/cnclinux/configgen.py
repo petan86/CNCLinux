@@ -75,7 +75,7 @@ def default_machine():
             "home_position": 0.0,
             "home_offset": 0.0,
             "home_sequence": 0 if letter == "Z" else 1,
-            "step_len": 2, "step_space": 2, "dir_setup": 5, "dir_hold": 5,   # µs
+            "step_len": 3, "step_space": 3, "dir_setup": 5, "dir_hold": 5,   # µs (DM542/DMS42T: pulz ≥ 2,5 µs)
         })
     return {
         "version": 1,

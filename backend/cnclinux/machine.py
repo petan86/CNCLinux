@@ -26,7 +26,10 @@ class Machine:
         self.lock = threading.RLock()
         self.s = lc.stat()
         self.c = lc.command()
-        self.e = lc.error_channel()
+        try:
+            self.e = lc.error_channel()
+        except Exception:
+            self.e = None          # kanál chyb není kritický; status musí fungovat i bez něj
         self.s.poll()
         self.ini = lc.ini(ini_path)
         self.config_dir = os.path.dirname(os.path.abspath(ini_path))
@@ -55,12 +58,19 @@ class Machine:
 
     def _poll_errors(self):
         lc = self.lc
-        while True:
-            err = self.e.poll()
-            if not err:
-                break
-            kind, text = err
-            self.on_message("error" if kind in (lc.NML_ERROR, lc.OPERATOR_ERROR) else "info", text)
+        if self.e is None:
+            return
+        try:
+            while True:
+                err = self.e.poll()
+                if not err:
+                    break
+                kind, text = err
+                self.on_message("error" if kind in (lc.NML_ERROR, lc.OPERATOR_ERROR) else "info", text)
+        except Exception:
+            # NML kanál chyb občas není platný (časování startu). Není kritický –
+            # přeskočíme, ať to nezhatí čtení stavu (DRO, polohy, E-stop).
+            pass
 
     def _wait(self):
         self.c.wait_complete(WAIT_TIMEOUT_S)

@@ -61,18 +61,28 @@ class App:
             try:
                 if self.runtime.status()["state"] in ("stopped", "failed"):
                     st = self.board.session_state() if self.board.session else self.board.probe(1)
+                    st.setdefault("active", True)
+                elif self.demo:
+                    st = {"ok": True, "active": True, "rtt_ms": None, "inputs": 0}
                 else:
+                    # Když běží LinuxCNC, komunikaci s deskou drží HAL komponenta remora-eth.
+                    # remora.status je TRUE jen když se pakety skutečně vyměňují, a to nastává
+                    # až po uvolnění E-stopu (remora.enable = iocontrol.0.user-enable-out).
+                    # V E-stopu deska nekomunikuje schválně → stav "neznámý", ne porucha.
                     m = self.runtime.get_machine()
-                    ok = bool(m.hal_value("remora.status")) if m else False
-                    if self.demo:
-                        ok = True
-                    st = {"ok": ok, "rtt_ms": None,
+                    enabled = bool(m.hal_value("remora.enable")) if m else False
+                    status = bool(m.hal_value("remora.status")) if m else False
+                    st = {"ok": status if enabled else True, "active": enabled, "rtt_ms": None,
                           "inputs": m.hal_inputs(len(configgen.EC300_INPUTS)) if m else 0}
                 self.board_state = st
-                if was_ok is not None and was_ok != st["ok"]:
-                    self.message("info" if st["ok"] else "error",
-                                 "Deska EC300 odpovídá." if st["ok"] else "Deska EC300 neodpovídá (Ethernet, napájení?).")
-                was_ok = st["ok"]
+                # hlášky o (ne)odpovídání dávají smysl jen když se komunikace očekává
+                if st.get("active", True):
+                    if was_ok is not None and was_ok != st["ok"]:
+                        self.message("info" if st["ok"] else "error",
+                                     "Deska EC300 odpovídá." if st["ok"] else "Deska EC300 neodpovídá (Ethernet, napájení?).")
+                    was_ok = st["ok"]
+                else:
+                    was_ok = None
             except Exception:
                 traceback.print_exc()
             time.sleep(0.25 if self.board.session else 1.0)
@@ -100,7 +110,7 @@ class App:
             out.append(rt["error"] or "LinuxCNC selhalo.")
         if not rt["configured"]:
             out.append("Stroj není nastavený: spusť průvodce v F1 Nastavení.")
-        if not self.board_state.get("ok"):
+        if self.board_state.get("active", True) and not self.board_state.get("ok"):
             out.append("Deska EC300 neodpovídá.")
         if mstat:
             if mstat["state"] == "estop":
@@ -169,7 +179,7 @@ def make_handler(app):
         def _machine(self):
             m = app.runtime.get_machine()
             if m is None:
-                raise UserError("Řízení (LinuxCNC) neběží. Spusť ho v F5 Diagnostika.")
+                raise UserError("Řízení (LinuxCNC) neběží. Spusť ho v F1 Nastavení → Řízení a deska.")
             return m
 
         def _require_stopped(self):
@@ -400,7 +410,7 @@ def make_handler(app):
                         res = app.runtime.apply(machine, upload=True, log=log)
                         if start:
                             # vyplnění průvodce nesmí samo povolit pohyb: spuštění až po potvrzení kontroly
-                            log("Pro spuštění potvrď kontrolu bezpečnosti v F5 Diagnostika → Spustit.")
+                            log("Pro spuštění potvrď kontrolu bezpečnosti v F1 Nastavení → Řízení a deska → Spustit.")
                         log("Hotovo.")
                         return res
                     return self._ok(job=app.jobs.start("Uložení nastavení stroje", job))
@@ -446,8 +456,15 @@ def make_handler(app):
                         f.write(data)
                     return self._ok(job=app.jobs.start("Nahrání firmwaru do EC300", lambda log: system.flash_firmware(log, path, app.demo)))
                 if p == "/api/system/power":
-                    self._require_stopped()
-                    system.power(self._json().get("action"), app.demo)
+                    action = self._json().get("action")
+                    # Vypnutí/restart smí i za běhu: nejdřív řízení korektně zastavíme
+                    # (odpojí motory do klidu), pak teprve vypneme systém.
+                    if action in ("poweroff", "reboot"):
+                        try:
+                            app.runtime.stop()
+                        except Exception:
+                            pass
+                    system.power(action, app.demo)
                     return self._ok()
                 return self._send(404, {"ok": False, "error": "Nenalezeno"})
             except Exception as exc:

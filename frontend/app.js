@@ -90,6 +90,13 @@ $("#sLock").addEventListener("click", async () => {
   if (isAdmin()) { await post("/api/auth/logout", {}).catch(() => {}); await refreshAuth(); toast("Nastavení zamčeno.", true); }
   else openUnlock();
 });
+$("#sPower").addEventListener("click", () => {
+  if (!isAdmin()) return openUnlock();
+  if (!confirm("Vypnout Raspberry Pi?\n\nŘízení se bezpečně zastaví. Až zhasnou kontrolky (~15 s), můžeš odpojit napájení.")) return;
+  post("/api/system/power", { action: "poweroff" })
+    .then(() => toast("Raspberry se vypíná… počkej, až zhasnou kontrolky, pak odpoj napájení.", true))
+    .catch((err) => toast(err.message));
+});
 async function refreshAuth() {
   S.auth = await get("/api/auth");
   const l = $("#sLock");

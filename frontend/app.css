@@ -35,6 +35,8 @@ input,select,textarea{font:inherit;color:var(--fg)}
 .status .clock{color:var(--muted)}
 .status .lock{color:var(--muted);padding:4px 8px;border:1px solid var(--line);border-radius:var(--r)}
 .status .lock.open{color:var(--ok);border-color:var(--ok)}
+.status .power{color:var(--muted);padding:4px 9px;border:1px solid var(--line);border-radius:var(--r);font-size:15px;line-height:1}
+.status .power:hover{color:var(--bad);border-color:var(--bad)}
 @keyframes blink{to{opacity:.35}}
 
 /* ---------- záložky F1-F6 ---------- */

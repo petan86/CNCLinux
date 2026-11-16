@@ -28,6 +28,26 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HEADLESS = os.path.join(HERE, "headless.py")
 HEADLESS_PID = "/tmp/cnclinux-headless.pid"
 GOOD_AFTER_S = 10          # konfigurace je "funkční" po 10 s běhu s komunikací s deskou
+STARTUP_TIMEOUT_S = 120    # kolik čekáme, než LinuxCNC naběhne a NML buffery jsou dostupné
+PROBE_INTERVAL_S = 1.5     # jak často zkoušet připravenost NML (v samostatném procesu)
+
+# Jednorázový test, zda jsou NML buffery LinuxCNC připravené. Běží v samostatném
+# procesu schválně: kdyby se linuxcnc.stat() poprvé vytvořil v procesu backendu
+# dřív, než buffery existují, zůstalo by NML spojení v tom procesu „otrávené"
+# a Machine() by pak už nikdy nenaběhlo (i když LinuxCNC mezitím naběhl).
+_NML_PROBE = (
+    "import linuxcnc,sys\n"
+    "try:\n"
+    "    s=linuxcnc.stat(); linuxcnc.command(); linuxcnc.error_channel()\n"
+    "    s.poll(); _=s.task_state; _=s.tool_in_spindle\n"  # 1. poll nastartuje mapování tabulky nástrojů
+    "    s.poll(); _=s.tool_in_spindle\n"                   # 2. poll musí projít už bez varovani 'tool mmap not available'
+    "except Exception as e:\n"
+    "    sys.stderr.write(str(e)); sys.exit(1)\n"
+    "sys.exit(0)\n"
+)
+# LinuxCNC vypíše toto na stderr, dokud iocontrol nedomapuje tabulku nástrojů.
+# Dokud se to objevuje, je moc brzy vytvářet in-process stat() (jinak se trvale poškodí).
+_NOT_READY_MARK = "tool mmap"
 
 
 class Runtime:
@@ -50,6 +70,8 @@ class Runtime:
         self.error = ""
         self.machine = None
         self.good_marked = False
+        self._last_probe = 0.0
+        self._probe_err = ""
         threading.Thread(target=self._monitor, daemon=True).start()
 
     # ---------------------------------------------------------------- konfigurace
@@ -154,7 +176,7 @@ class Runtime:
         # nová konfigurace: před prvním spuštěním musí správce potvrdit kontrolu bezpečnosti
         with open(self.commission_flag, "w", encoding="utf-8") as f:
             f.write(time.strftime("%Y-%m-%d %H:%M:%S"))
-        log("Před prvním spuštěním potvrď kontrolu bezpečnostních obvodů (F5 Diagnostika → Spustit).")
+        log("Před prvním spuštěním potvrď kontrolu bezpečnostních obvodů (F1 Nastavení → Řízení a deska → Spustit).")
         with self.lock:
             self.good_marked = False
         return {"warnings": warnings}
@@ -234,7 +256,15 @@ class Runtime:
                 proc.wait(timeout=5)
             except Exception:
                 pass
+        # Vždy dočistit HAL/RT, i po korektním vypnutí. Jinak občas zůstane viset
+        # komponenta remora-eth a po dalším startu nenaskočí remora.status
+        # (E-stop pak nejde uvolnit). halrun -U zajistí čistý start.
+        try:
             subprocess.run(["halrun", "-U"], capture_output=True, timeout=20)
+        except Exception:
+            pass
+        self.board.stop_session()
+        time.sleep(1.5)   # chvíle, než deska uvolní starou relaci
         with self.lock:
             self.proc = None
             self.state = "stopped"
@@ -266,6 +296,24 @@ class Runtime:
                     "last_good": self.last_good(), "demo": self.demo,
                     "commissioning": self.commissioning_pending()}
 
+    def _nml_ready(self):
+        """V samostatném procesu ověří, že jsou NML buffery LinuxCNC dostupné.
+        Throttlováno na PROBE_INTERVAL_S, ať to nespouštíme při každém cyklu."""
+        now = time.time()
+        if now - self._last_probe < PROBE_INTERVAL_S:
+            return False
+        self._last_probe = now
+        try:
+            r = subprocess.run([sys.executable, "-c", _NML_PROBE], cwd=self.machine_dir,
+                               capture_output=True, timeout=8, text=True)
+        except Exception as e:
+            self._probe_err = str(e)
+            return False
+        out = ((r.stderr or "") + (r.stdout or "")).strip()
+        self._probe_err = out
+        # NML buffery jsou k dispozici až když poll projde bez chyby i bez varování o tool mmap
+        return r.returncode == 0 and _NOT_READY_MARK not in out
+
     def _monitor(self):
         while True:
             time.sleep(0.25)
@@ -279,6 +327,16 @@ class Runtime:
                         self.proc = None
                     self.on_message("error", self.error)
                     continue
+                # Nejdřív v samostatném procesu počkáme, až jsou NML buffery hotové.
+                if not self.demo and not self._nml_ready():
+                    if time.time() - (self.started_at or 0) > STARTUP_TIMEOUT_S:
+                        with self.lock:
+                            self.state = "failed"
+                            self.error = "LinuxCNC nenaběhlo do %d s." % STARTUP_TIMEOUT_S
+                            if self._probe_err:
+                                self.error += " (" + self._probe_err[:160] + ")"
+                        self.on_message("error", self.error)
+                    continue
                 try:
                     m = Machine(self.lc, self.hal, self.ini_path, self.on_message)
                     with self.lock:
@@ -286,10 +344,12 @@ class Runtime:
                         self.state = "running"
                         self.started_at = time.time()
                     self.on_message("info", "LinuxCNC běží.")
-                except Exception:
-                    if time.time() - (self.started_at or 0) > 60:
+                except Exception as e:
+                    if time.time() - (self.started_at or 0) > STARTUP_TIMEOUT_S:
                         with self.lock:
-                            self.state, self.error = "failed", "LinuxCNC nenaběhlo do 60 s."
+                            self.state = "failed"
+                            self.error = "LinuxCNC naběhlo, ale řízení se nepřipojilo: %s" % str(e)[:160]
+                        self.on_message("error", self.error)
                     continue
             elif st == "running":
                 if not self.demo and proc and proc.poll() is not None:
