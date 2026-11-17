@@ -1,0 +1,54 @@
+# Vlastní HAL příkazy. OpenCNC Web tento soubor nepřepisuje.
+# =====================================================================
+# MPG ruční kolečko (jednoduchý pendant na EC300)
+#   Kolečko A/B : WHA = remora.input.25, WHB = remora.input.26
+#   Volba osy   : XIN = remora.input.17, YIN = 18, ZIN = 19
+#   Násobič     : X10IN = remora.input.22, X100IN = remora.input.21  (x1 = oba vyp)
+# Jízda kolečkem funguje v režimu "svět" (po zreferování stroje).
+# =====================================================================
+
+loadrt encoder num_chan=1
+addf encoder.update-counters servo-thread
+addf encoder.capture-position servo-thread
+
+loadrt mux4 count=1
+addf mux4.0 servo-thread
+
+# --- kvadraturní dekodér kolečka (1 impuls na zámek kolečka) ---
+setp encoder.0.counter-mode 0
+setp encoder.0.x4-mode 0
+net mpg-wheel-a remora.input.25 => encoder.0.phase-A
+net mpg-wheel-b remora.input.26 => encoder.0.phase-B
+
+# --- násobič -> krok na jeden impuls kolečka ---
+#   x1 = 0.001 mm, x10 = 0.01 mm, x100 = 0.1 mm
+setp mux4.0.in0 0.001
+setp mux4.0.in1 0.010
+setp mux4.0.in2 0.100
+setp mux4.0.in3 0.100
+net mpg-mult-0 remora.input.22 => mux4.0.sel0
+net mpg-mult-1 remora.input.21 => mux4.0.sel1
+
+# --- rozvod kroků a měřítka do všech os (jezdí jen zvolená osa) ---
+net mpg-counts encoder.0.counts => axis.x.jog-counts axis.y.jog-counts axis.z.jog-counts
+net mpg-scale  mux4.0.out       => axis.x.jog-scale  axis.y.jog-scale  axis.z.jog-scale
+
+# --- výběr osy přepínačem ---
+net mpg-sel-x remora.input.17 => axis.x.jog-enable
+net mpg-sel-y remora.input.18 => axis.y.jog-enable
+net mpg-sel-z remora.input.19 => axis.z.jog-enable
+
+# poziční režim: každý impuls kolečka = přesný krok
+setp axis.x.jog-vel-mode 0
+setp axis.y.jog-vel-mode 0
+setp axis.z.jog-vel-mode 0
+
+# =====================================================================
+# Tlumení kmitání stepgenu v klidu.
+# Poziční stepgen s vysokým pgain (10) kolem zlomkové polohy "loví" ±1 krok
+# -> osa slyšitelně kmitá a DRO poskakuje o 0,001 mm. Snížení pgain na 2
+# kmitání odstraní (pgain 5 ještě kmitá, 2-3 drží klid), aniž by znatelně
+# zhoršilo sledování polohy. Přepisuje hodnotu z remora.hal (INI PGAIN=10).
+setp remora.joint.0.pgain 2
+setp remora.joint.1.pgain 2
+setp remora.joint.2.pgain 2

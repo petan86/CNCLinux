@@ -94,6 +94,16 @@ class Machine:
             self._wait()
             self.s.poll()
 
+    def _resume_manual(self):
+        """Po MDI příkazu (vřeteno/chlazení) vrátí řízení do ručního režimu včetně
+        teleop, aby zase fungovalo ruční kolečko MPG (jezdí jen v režimu manual/svět).
+        Modální stavy jako M3 (vřeteno) přepnutí režimu přežijí."""
+        self._wait()
+        self._set_mode(self.lc.MODE_MANUAL)
+        if self._all_homed():
+            self.c.teleop_enable(1)
+            self._wait()
+
     def _axes(self):
         return [i for i in range(9) if self.s.axis_mask & (1 << i)]
 
@@ -327,10 +337,12 @@ class Machine:
                     if rpm <= 0:
                         raise UserError("Zadej otáčky vřetena.")
                     c.mdi("%s S%d" % ("M3" if d == "cw" else "M4", int(rpm)))
+                self._resume_manual()   # ruční frézování: vřeteno běží dál, kolečko MPG zas jede
             elif cmd == "coolant":
                 self._require_on(); self._require_idle(); self._require_homed("Chlazení")
                 self._set_mode(lc.MODE_MDI)
                 c.mdi("M8" if a.get("on") else "M9")
+                self._resume_manual()
             elif cmd == "tool_change":
                 n = int(a["tool"])
                 self._require_on(); self._require_idle(); self._require_homed("Výměna nástroje")

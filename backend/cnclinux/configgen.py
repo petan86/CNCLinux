@@ -232,7 +232,7 @@ def ini_text(m, paths):
         w("[JOINT_%d]\nTYPE = %s" % (j, "ANGULAR" if letter in "ABC" else "LINEAR"))
         w("MIN_LIMIT = %s\nMAX_LIMIT = %s" % (_f(a["min_limit"]), _f(a["max_limit"])))
         w("MAX_VELOCITY = %s\nMAX_ACCELERATION = %s\nSTEPGEN_MAXACCEL = %s" % (_f(vel), _f(acc), _f(acc * 1.25)))
-        w("SCALE = %s\nFERROR = 1.0\nMIN_FERROR = 0.5\nPGAIN = 10" % _f(axis_scale(a), 6))
+        w("SCALE = %s\nFERROR = 1.0\nMIN_FERROR = 0.5\nPGAIN = 2" % _f(axis_scale(a), 6))
         has_home = ("home_" + letter) in inputs
         if has_home:
             shared = inputs.get("home_" + letter) in (inputs.get("limneg_" + letter), inputs.get("limpos_" + letter))
